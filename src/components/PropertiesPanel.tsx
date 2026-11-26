@@ -1,36 +1,36 @@
-import { RotateCcw, Sliders, Sparkles } from 'lucide-react';
+import { RotateCcw, Sliders, Sparkles, VolumeX } from 'lucide-react';
 import { useRef } from 'react';
 import type {
   AudioClip,
   CaptionTemplateId,
+  GraphicClip,
+  MediaAsset,
   PlaybackSpeed,
   TextClip,
   TimelineClip,
   VideoClip,
 } from '../types/editor';
 import { CAPTION_TEMPLATES } from '../utils/captions';
+import { useSystemFonts } from '../utils/systemFonts';
 import { dbToGain, formatDb, gainToDb } from '../utils/time';
+import { GraphicProperties } from './GraphicProperties';
 
 interface PropertiesPanelProps {
   selectedClip: TimelineClip | null;
   clips: TimelineClip[];
+  mediaAssets?: MediaAsset[];
   onUpdateClip: (
     id: string,
     patch: Partial<TimelineClip>,
     recordHistory?: boolean
   ) => void;
   onApplyTextStyleToAll?: (sourceClipId: string) => void;
+  onSaveGraphicPreset?: (clip: GraphicClip, name: string) => void;
+  onRemoveSilence?: (clip: VideoClip | AudioClip) => void;
   onPushHistory: (snapshot: TimelineClip[]) => void;
 }
 
 const SPEEDS: PlaybackSpeed[] = [0.5, 1, 1.5, 2];
-const FONT_FAMILIES = [
-  { label: 'Inter (Sans)', value: 'Inter, sans-serif' },
-  { label: 'Georgia (Serif)', value: 'Georgia, serif' },
-  { label: 'Courier (Mono)', value: '"Courier New", monospace' },
-  { label: 'Impact (Display)', value: 'Impact, sans-serif' },
-  { label: 'Verdana', value: 'Verdana, sans-serif' },
-];
 
 interface SliderRowProps {
   label: string;
@@ -81,8 +81,11 @@ function SliderRow({
 export function PropertiesPanel({
   selectedClip,
   clips,
+  mediaAssets = [],
   onUpdateClip,
   onApplyTextStyleToAll,
+  onSaveGraphicPreset,
+  onRemoveSilence,
   onPushHistory,
 }: PropertiesPanelProps) {
   const dragSnapshotRef = useRef<TimelineClip[] | null>(null);
@@ -119,11 +122,13 @@ export function PropertiesPanel({
           <h2 className="text-xs font-semibold uppercase tracking-wider text-[#9aa0ad]">
             {selectedClip.trackType === 'video'
               ? 'Clip Properties'
-              : selectedClip.trackType === 'captions'
-                ? 'Caption Properties'
-                : selectedClip.trackType === 'text'
-                  ? 'Text Properties'
-                  : 'Audio Properties'}
+              : selectedClip.trackType === 'graphics'
+                ? 'Graphic Properties'
+                : selectedClip.trackType === 'captions'
+                  ? 'Caption Properties'
+                  : selectedClip.trackType === 'text'
+                    ? 'Text Properties'
+                    : 'Audio Properties'}
           </h2>
           <p className="text-[11px] text-[#6d7382] truncate">
             {selectedClip.name}
@@ -162,6 +167,7 @@ export function PropertiesPanel({
           <VideoProperties
             clip={selectedClip}
             onUpdate={(patch, rec) => onUpdateClip(selectedClip.id, patch, rec)}
+            onRemoveSilence={onRemoveSilence}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           />
@@ -185,10 +191,23 @@ export function PropertiesPanel({
           />
         )}
 
+        {selectedClip.trackType === 'graphics' && (
+          <GraphicProperties
+            key={selectedClip.id}
+            clip={selectedClip}
+            mediaAssets={mediaAssets}
+            onUpdate={(patch, rec) => onUpdateClip(selectedClip.id, patch, rec)}
+            onSavePreset={(c, name) => onSaveGraphicPreset?.(c, name)}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          />
+        )}
+
         {selectedClip.trackType === 'audio' && (
           <AudioProperties
             clip={selectedClip}
             onUpdate={(patch, rec) => onUpdateClip(selectedClip.id, patch, rec)}
+            onRemoveSilence={onRemoveSilence}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           />
@@ -201,11 +220,13 @@ export function PropertiesPanel({
 function VideoProperties({
   clip,
   onUpdate,
+  onRemoveSilence,
   onDragStart,
   onDragEnd,
 }: {
   clip: VideoClip;
   onUpdate: (patch: Partial<VideoClip>, recordHistory?: boolean) => void;
+  onRemoveSilence?: (clip: VideoClip | AudioClip) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
@@ -347,6 +368,16 @@ function VideoProperties({
                 ))}
               </div>
             </div>
+            {onRemoveSilence && (
+              <button
+                type="button"
+                onClick={() => onRemoveSilence(clip)}
+                className="w-full py-2 px-3 rounded-lg bg-[#00d4c6]/15 hover:bg-[#00d4c6]/25 border border-[#00d4c6]/45 text-[#00d4c6] font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <VolumeX className="w-3.5 h-3.5" />
+                <span>Remove Silent Parts</span>
+              </button>
+            )}
           </div>
         </>
       )}
@@ -398,6 +429,11 @@ function TextProperties({
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
+  const systemFonts = useSystemFonts();
+  const normalizedFont = clip.fontFamily.split(',')[0].replace(/['"]/g, '').trim();
+  const fontOptions = systemFonts.includes(normalizedFont)
+    ? systemFonts
+    : [normalizedFont, ...systemFonts].filter(Boolean);
   return (
     <>
       <div className="space-y-2">
@@ -416,13 +452,13 @@ function TextProperties({
         <label className="text-[11px] text-[#9aa0ad] block">Font Family</label>
         <div className="flex items-center gap-2">
           <select
-            value={clip.fontFamily}
+            value={normalizedFont}
             onChange={(e) => onUpdate({ fontFamily: e.target.value }, true)}
             className="flex-1 bg-[#1e2028] border border-[#2a2d36] focus:border-[#00d4c6] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none"
           >
-            {FONT_FAMILIES.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
+            {fontOptions.map((font) => (
+              <option key={font} value={font}>
+                {font}
               </option>
             ))}
           </select>
@@ -638,11 +674,13 @@ function TextProperties({
 function AudioProperties({
   clip,
   onUpdate,
+  onRemoveSilence,
   onDragStart,
   onDragEnd,
 }: {
   clip: AudioClip;
   onUpdate: (patch: Partial<AudioClip>, recordHistory?: boolean) => void;
+  onRemoveSilence?: (clip: VideoClip | AudioClip) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
@@ -682,6 +720,16 @@ function AudioProperties({
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       />
+      {onRemoveSilence && (
+        <button
+          type="button"
+          onClick={() => onRemoveSilence(clip)}
+          className="w-full py-2 px-3 rounded-lg bg-[#00d4c6]/15 hover:bg-[#00d4c6]/25 border border-[#00d4c6]/45 text-[#00d4c6] font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+        >
+          <VolumeX className="w-3.5 h-3.5" />
+          <span>Remove Silent Parts</span>
+        </button>
+      )}
     </div>
   );
 }

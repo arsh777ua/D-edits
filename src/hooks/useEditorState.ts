@@ -3,6 +3,7 @@ import type {
   AudioClip,
   CaptionTemplateId,
   CaptionWord,
+  GraphicPreset,
   MediaAsset,
   PlaybackSpeed,
   TextClip,
@@ -11,6 +12,7 @@ import type {
   TrackType,
   VideoClip,
 } from '../types/editor';
+import { instantiateGraphicClip } from '../utils/graphicTemplates';
 import { createMediaAsset } from '../utils/media';
 import { saveMediaBlob } from '../utils/projectStorage';
 import { clamp, uid } from '../utils/time';
@@ -27,6 +29,7 @@ const MAX_HISTORY = 60;
 const DEFAULT_TRACKS: TimelineTrack[] = [
   { id: 'captions-0', type: 'captions', index: 0, label: 'Captions 1' },
   { id: 'text-0', type: 'text', index: 0, label: 'Text 1' },
+  { id: 'graphics-0', type: 'graphics', index: 0, label: 'Graphics 1' },
   { id: 'video-1', type: 'video', index: 1, label: 'Video 2' },
   { id: 'video-0', type: 'video', index: 0, label: 'Video 1' },
   { id: 'audio-0', type: 'audio', index: 0, label: 'Audio 1' },
@@ -36,6 +39,7 @@ function buildTracksForClips(clips: TimelineClip[]): TimelineTrack[] {
   const maxIdx: Record<TrackType, number> = {
     captions: 0,
     text: 0,
+    graphics: 0,
     video: 1,
     audio: 0,
   };
@@ -54,6 +58,9 @@ function buildTracksForClips(clips: TimelineClip[]): TimelineTrack[] {
   }
   for (let i = maxIdx.text; i >= 0; i--) {
     result.push({ id: `text-${i}`, type: 'text', index: i, label: `Text ${i + 1}` });
+  }
+  for (let i = maxIdx.graphics; i >= 0; i--) {
+    result.push({ id: `graphics-${i}`, type: 'graphics', index: i, label: `Graphics ${i + 1}` });
   }
   for (let i = maxIdx.video; i >= 0; i--) {
     result.push({ id: `video-${i}`, type: 'video', index: i, label: `Video ${i + 1}` });
@@ -220,9 +227,11 @@ export function useEditorState() {
           ? 'Video'
           : type === 'text'
             ? 'Text'
-            : type === 'captions'
-              ? 'Captions'
-              : 'Audio';
+            : type === 'graphics'
+              ? 'Graphics'
+              : type === 'captions'
+                ? 'Captions'
+                : 'Audio';
       const newTrack: TimelineTrack = {
         id: `${type}-${nextIndex}`,
         type,
@@ -357,16 +366,36 @@ export function useEditorState() {
         trackIndex,
         name: preset?.text || 'Text Overlay',
         startTime: start,
-        duration: 4,
+        duration: preset?.duration ?? 4,
         sourceStart: 0,
         sourceDuration: 600,
         text: preset?.text ?? 'Double-click or edit text',
         fontSize: preset?.fontSize ?? 42,
         color: preset?.color ?? '#ffffff',
-        fontFamily: preset?.fontFamily ?? 'Inter, sans-serif',
+        fontFamily: preset?.fontFamily ?? 'Segoe UI',
         x: preset?.x ?? 0,
         y: preset?.y ?? 25,
+        bold: preset?.bold,
+        outlineColor: preset?.outlineColor,
+        outlineWidth: preset?.outlineWidth,
+        shadowColor: preset?.shadowColor,
+        shadowBlur: preset?.shadowBlur,
+        bgColor: preset?.bgColor,
+        bgOpacity: preset?.bgOpacity,
       };
+      applyEdit((prev) => [...prev, clip]);
+      setSelectedClipId(clip.id);
+    },
+    [applyEdit, playhead, setSelectedClipId]
+  );
+
+  const addGraphicClip = useCallback(
+    (preset: GraphicPreset, trackIndex = 0, explicitStartTime?: number) => {
+      const start =
+        explicitStartTime !== undefined
+          ? Math.max(0, explicitStartTime)
+          : Math.max(0, playhead);
+      const clip = instantiateGraphicClip(preset, start, trackIndex);
       applyEdit((prev) => [...prev, clip]);
       setSelectedClipId(clip.id);
     },
@@ -408,7 +437,7 @@ export function useEditorState() {
         words: seg.words,
         fontSize: style.fontSize,
         color: style.color,
-        fontFamily: style.fontFamily ?? 'Inter, sans-serif',
+        fontFamily: style.fontFamily ?? 'Segoe UI',
         x: 0,
         y: style.y,
         bold: true,
@@ -668,6 +697,7 @@ export function useEditorState() {
     applyEdit,
     addMediaToTimeline,
     addTextClip,
+    addGraphicClip,
     addCaptionClips,
     applyStyleToAllTextClips,
     updateClip,

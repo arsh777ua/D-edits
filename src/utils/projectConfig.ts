@@ -45,7 +45,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   width: 1920,
   height: 1080,
   fps: 30,
-  locationLabel: 'Documents\\CutLite Projects',
+  locationLabel: 'Documents\\D-EDITS Projects',
   previewBackground: 'black',
   previewBackgroundColor: '#000000',
 };

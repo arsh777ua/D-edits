@@ -1,6 +1,7 @@
 import {
   Check,
   Download,
+  Globe,
   Home,
   Keyboard,
   Redo2,
@@ -65,7 +66,7 @@ export function TopBar({
             <Scissors className="w-4 h-4 stroke-[2.4]" />
           </div>
           <span className="font-semibold text-sm tracking-tight text-white hidden sm:inline">
-            CutLite
+            D-EDITS
           </span>
         </div>
 
@@ -168,6 +169,17 @@ export function TopBar({
         >
           <Keyboard className="w-4 h-4" />
         </button>
+
+        <a
+          href="https://www.dblanks.site/"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Visit dblanks.site"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium text-[#b0b5c0] hover:text-[#00d4c6] hover:bg-[#1e2028] border border-transparent hover:border-[#2a2d36] transition-colors"
+        >
+          <Globe className="w-3.5 h-3.5 text-[#00d4c6]" />
+          <span className="hidden sm:inline">dblanks.site</span>
+        </a>
 
         <button
           type="button"

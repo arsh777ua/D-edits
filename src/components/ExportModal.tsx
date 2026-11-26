@@ -1,7 +1,6 @@
 import { AlertCircle, CheckCircle2, Download, Loader2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type {
-  ExportEncoder,
   ExportProgress,
   ExportQuality,
   ExportSettings,
@@ -48,10 +47,35 @@ export function ExportModal({
     resolution: 'project',
     width: projectSettings.width,
     height: projectSettings.height,
-    fps: projectSettings.fps,
-    quality: 'high',
-    encoder: 'fast',
+    fps: 30,
+    quality: 'standard',
+    encoder: 'hq',
   });
+
+  const [nativeEncoderLabel, setNativeEncoderLabel] = useState<string>(
+    'Native FFmpeg (Detecting GPU...)'
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    fetch('/api/native-export/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { available?: boolean; encoder?: { label?: string } } | null) => {
+        if (!active) return;
+        if (data?.available && data.encoder?.label) {
+          setNativeEncoderLabel(`Native FFmpeg (${data.encoder.label})`);
+        } else {
+          setNativeEncoderLabel('GPU WebCodecs Fallback');
+        }
+      })
+      .catch(() => {
+        if (active) setNativeEncoderLabel('GPU WebCodecs Fallback');
+      });
+    return () => {
+      active = false;
+    };
+  }, [open]);
 
   const [progress, setProgress] = useState<ExportProgress>({
     status: 'idle',
@@ -210,23 +234,40 @@ export function ExportModal({
 
             {/* Quality / Bitrate */}
             <div className="space-y-1.5">
-              <span className="text-xs text-[#9aa0ad] block">
-                Quality & Bitrate
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-[#9aa0ad]">
+                  Quality & Bitrate
+                </span>
+                <span className="text-[10px] font-mono text-[#00d4c6]">
+                  {settings.customBitrateMbps
+                    ? `${settings.customBitrateMbps} Mbps custom`
+                    : settings.quality === 'ultra'
+                      ? '60+ Mbps'
+                      : settings.quality === 'high'
+                        ? '35 Mbps'
+                        : '16 Mbps'}
+                </span>
+              </div>
               <div className="grid grid-cols-3 gap-2">
                 {(
                   [
-                    { id: 'standard', label: 'Standard', desc: '8 Mbps' },
-                    { id: 'high', label: 'High', desc: '16 Mbps' },
-                    { id: 'ultra', label: 'Ultra', desc: '28+ Mbps' },
+                    { id: 'standard', label: 'CRF 23 · Fast', desc: '16 Mbps' },
+                    { id: 'high', label: 'CRF 20 · High', desc: '35 Mbps' },
+                    { id: 'ultra', label: 'CRF 18 · Lossless', desc: '60+ Mbps' },
                   ] as Array<{ id: ExportQuality; label: string; desc: string }>
                 ).map((q) => (
                   <button
                     key={q.id}
                     type="button"
-                    onClick={() => setSettings((s) => ({ ...s, quality: q.id }))}
+                    onClick={() =>
+                      setSettings((s) => ({
+                        ...s,
+                        quality: q.id,
+                        customBitrateMbps: undefined,
+                      }))
+                    }
                     className={`py-2 px-2.5 rounded-lg border text-left transition-colors cursor-pointer ${
-                      settings.quality === q.id
+                      settings.quality === q.id && !settings.customBitrateMbps
                         ? 'bg-[#00d4c6]/15 border-[#00d4c6] text-white'
                         : 'bg-[#1e2028] border-[#2a2d36] text-[#b0b5c0] hover:text-white'
                     }`}
@@ -236,48 +277,49 @@ export function ExportModal({
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* Encoder Mode */}
-            <div className="space-y-1.5">
-              <span className="text-xs text-[#9aa0ad] block">Encoder Mode</span>
-              <div className="grid grid-cols-2 gap-2">
-                {(
-                  [
-                    {
-                      id: 'fast',
-                      label: 'Fast (GPU Hardware)',
-                      desc: '1x real-time export',
-                    },
-                    {
-                      id: 'hq',
-                      label: 'Best Quality (FFmpeg)',
-                      desc: 'Sharpest CRF H.264, slower',
-                    },
-                  ] as Array<{ id: ExportEncoder; label: string; desc: string }>
-                ).map((enc) => (
+              <div className="flex items-center gap-1.5 pt-1">
+                <span className="text-[10px] text-[#7e8494] shrink-0">
+                  Bitrate:
+                </span>
+                {[20, 35, 50, 80].map((mbps) => (
                   <button
-                    key={enc.id}
+                    key={mbps}
                     type="button"
                     onClick={() =>
-                      setSettings((s) => ({ ...s, encoder: enc.id }))
+                      setSettings((s) => ({ ...s, customBitrateMbps: mbps }))
                     }
-                    className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
-                      settings.encoder === enc.id
-                        ? 'bg-[#00d4c6]/15 border-[#00d4c6] text-white'
-                        : 'bg-[#1e2028] border-[#2a2d36] text-[#b0b5c0] hover:text-white'
+                    className={`px-2 py-1 rounded text-[10px] font-mono border cursor-pointer ${
+                      settings.customBitrateMbps === mbps
+                        ? 'bg-[#00d4c6]/20 border-[#00d4c6] text-[#00d4c6]'
+                        : 'bg-[#1e2028] border-[#2a2d36] text-[#9aa0ad] hover:text-white'
                     }`}
                   >
-                    <div className="text-xs font-semibold">{enc.label}</div>
-                    <div className="text-[10px] opacity-75">{enc.desc}</div>
+                    {mbps}M
                   </button>
                 ))}
+                <input
+                  type="number"
+                  min={2}
+                  max={200}
+                  placeholder="Mbps"
+                  value={settings.customBitrateMbps ?? ''}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setSettings((s) => ({
+                      ...s,
+                      customBitrateMbps: v > 0 ? v : undefined,
+                    }));
+                  }}
+                  className="w-16 px-2 py-1 rounded bg-[#1e2028] border border-[#2a2d36] text-[10px] font-mono text-white outline-none focus:border-[#00d4c6]"
+                />
               </div>
             </div>
 
             <div className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-[#121419] border border-[#22252e]">
-              <span className="text-[#8c92a0]">Format</span>
-              <span className="font-mono text-white">MP4 (H.264 + AAC)</span>
+              <span className="text-[#8c92a0]">Encoder & Format</span>
+              <span className="font-mono text-[#00d4c6]">
+                {nativeEncoderLabel} · yuv420p · faststart
+              </span>
             </div>
 
             <div className="flex justify-end gap-2 pt-1">
@@ -309,7 +351,7 @@ export function ExportModal({
                   {progress.message}
                 </p>
                 <p className="text-[11px] text-[#8c92a0]">
-                  Processing locally in your browser
+                  Rendering natively outside the browser
                 </p>
               </div>
               <span className="text-xs font-mono text-[#00d4c6]">

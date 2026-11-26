@@ -11,6 +11,13 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
 
 # Editor directories and files
 .vscode/*
@@ -23,10 +30,3 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
-
-# Python / local caption server
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-.env

@@ -327,7 +327,7 @@ export function HomeScreen({
               <Scissors className="w-4 h-4 stroke-[2.4]" />
             </div>
             <span className="font-semibold text-base tracking-tight text-white">
-              CutLite
+              D-EDITS
             </span>
           </div>
 

@@ -16,10 +16,15 @@ import type {
   CaptionSegment,
   CaptionTemplateId,
   CaptionWord,
+  GraphicPreset,
   MediaAsset,
   SidebarTab,
   TextClip,
+  TimelineClip,
 } from '../types/editor';
+import { renderTimelineAudioToWav } from '../utils/timelineAudio';
+import { getProjectDuration } from '../utils/timeline';
+import { GraphicsLibraryPanel } from './GraphicsLibraryPanel';
 import {
   CAPTION_TEMPLATES,
   formatCaptionChunks,
@@ -31,11 +36,16 @@ interface LeftSidebarProps {
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
   mediaAssets: MediaAsset[];
+  clips?: TimelineClip[];
   importStatus?: string | null;
   onImportFiles: (files: FileList | File[]) => void;
   onAddMediaToTimeline: (asset: MediaAsset) => void;
   onRemoveMedia: (assetId: string) => void;
   onAddTextClip: (preset?: Partial<TextClip>) => void;
+  customPresets?: GraphicPreset[];
+  onAddGraphic?: (preset: GraphicPreset) => void;
+  onDuplicatePreset?: (preset: GraphicPreset) => void;
+  onDeletePreset?: (presetId: string) => void;
   onAddCaptionClips?: (
     segments: Array<{
       start: number;
@@ -89,11 +99,16 @@ export function LeftSidebar({
   activeTab,
   onTabChange,
   mediaAssets,
+  clips = [],
   importStatus,
   onImportFiles,
   onAddMediaToTimeline,
   onRemoveMedia,
   onAddTextClip,
+  customPresets = [],
+  onAddGraphic,
+  onDuplicatePreset,
+  onDeletePreset,
   onAddCaptionClips,
   onSeekTo,
 }: LeftSidebarProps) {
@@ -103,7 +118,6 @@ export function LeftSidebar({
 
   // Auto-captions state
   const [captionMode, setCaptionMode] = useState<'hinglish' | 'english'>('hinglish');
-  const [captionAssetId, setCaptionAssetId] = useState<string>('');
   const [captionTemplate, setCaptionTemplate] =
     useState<CaptionTemplateId>('none');
   const [captionColor, setCaptionColor] = useState('#ffffff');
@@ -136,22 +150,27 @@ export function LeftSidebar({
     (a) => a.type === 'video' || a.type === 'image'
   );
   const audioAssets = mediaAssets.filter((a) => a.type === 'audio');
-  const transcribableAssets = mediaAssets.filter(
-    (a) => a.type === 'video' || a.type === 'audio'
+  const timelineAudioClips = clips.filter(
+    (c) =>
+      c.trackType === 'audio' ||
+      (c.trackType === 'video' && c.mediaType === 'video')
   );
-  const selectedCaptionAsset =
-    transcribableAssets.find((a) => a.id === captionAssetId) ??
-    transcribableAssets[0];
+  const timelineAudioDuration = getProjectDuration(timelineAudioClips);
 
   const handleGenerateCaptions = async () => {
-    if (!selectedCaptionAsset) return;
+    if (timelineAudioClips.length === 0) return;
     setIsTranscribing(true);
     setCaptionError(null);
     setCaptionMeta(null);
 
     try {
+      const timelineWav = await renderTimelineAudioToWav(clips, mediaAssets);
+      if (!timelineWav) {
+        throw new Error('No playable audio found on the timeline.');
+      }
+
       const form = new FormData();
-      form.append('file', selectedCaptionAsset.file);
+      form.append('file', timelineWav);
       form.append('mode', captionMode);
 
       const res = await fetch('/api/transcribe', {
@@ -252,6 +271,7 @@ export function LeftSidebar({
         {(
           [
             { id: 'media', label: 'Media', icon: Film },
+            { id: 'graphics', label: 'Graphics', icon: Sparkles },
             { id: 'text', label: 'Text', icon: Type },
             { id: 'captions', label: 'Captions', icon: Captions },
             { id: 'audio', label: 'Audio', icon: Music },
@@ -519,27 +539,25 @@ export function LeftSidebar({
               </div>
             </div>
 
-            {/* Source Media Selector */}
+            {/* Timeline Audio Source */}
             <div className="space-y-1.5">
               <label className="text-[11px] text-[#9aa0ad] block">
-                Source Video / Audio
+                Timeline Audio Source
               </label>
-              {transcribableAssets.length === 0 ? (
+              {timelineAudioClips.length === 0 ? (
                 <p className="text-[11px] text-[#6d7382] p-2.5 rounded-lg bg-[#121419] border border-[#22252e]">
-                  Import a video or audio file in the Media/Audio tab first.
+                  Add a video or audio clip to the timeline first.
                 </p>
               ) : (
-                <select
-                  value={selectedCaptionAsset?.id ?? ''}
-                  onChange={(e) => setCaptionAssetId(e.target.value)}
-                  className="w-full bg-[#1e2028] border border-[#2a2d36] focus:border-[#00d4c6] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none"
-                >
-                  {transcribableAssets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="px-2.5 py-2 rounded-lg bg-[#121419] border border-[#22252e] flex items-center justify-between text-[11px]">
+                  <span className="text-[#d0d4dc]">
+                    Timeline ({timelineAudioClips.length} clip
+                    {timelineAudioClips.length > 1 ? 's' : ''})
+                  </span>
+                  <span className="font-mono text-[#00d4c6]">
+                    {formatDuration(timelineAudioDuration)}
+                  </span>
+                </div>
               )}
             </div>
 
@@ -650,7 +668,7 @@ export function LeftSidebar({
 
             <button
               type="button"
-              disabled={!selectedCaptionAsset || isTranscribing}
+              disabled={timelineAudioClips.length === 0 || isTranscribing}
               onClick={() => void handleGenerateCaptions()}
               className="w-full py-2.5 px-3 rounded-lg bg-[#00d4c6] hover:bg-[#18e3d5] disabled:opacity-40 disabled:pointer-events-none text-[#091214] font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
@@ -808,6 +826,14 @@ export function LeftSidebar({
               </div>
             )}
           </div>
+        )}
+        {activeTab === 'graphics' && onAddGraphic && (
+          <GraphicsLibraryPanel
+            customPresets={customPresets}
+            onAddGraphic={onAddGraphic}
+            onDuplicatePreset={onDuplicatePreset ?? (() => {})}
+            onDeletePreset={onDeletePreset ?? (() => {})}
+          />
         )}
       </div>
     </aside>

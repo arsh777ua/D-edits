@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-title CutLite - Minimal Video Editor
+title D-EDITS - Video Editor
 
 where node >nul 2>nul
 if errorlevel 1 (
@@ -25,10 +25,10 @@ if not exist "node_modules" (
 where python >nul 2>nul
 if not errorlevel 1 (
   echo Starting local Auto-Caption Server...
-  start "CutLite Caption Server" /min cmd /c "python server\caption_server.py"
+  start "D-EDITS Caption Server" /min cmd /c "python server\caption_server.py"
 )
 
-echo Starting CutLite...
+echo Starting D-EDITS...
 call npm run dev -- --open
 if errorlevel 1 (
   pause

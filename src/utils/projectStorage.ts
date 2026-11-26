@@ -178,7 +178,7 @@ export async function writeProjectJsonToFolder(
 ): Promise<void> {
   try {
     const safeName = (record.name || 'project').replace(/[^a-z0-9_-]/gi, '_');
-    const fileHandle = await handle.getFileHandle(`${safeName}.cutlite.json`, {
+    const fileHandle = await handle.getFileHandle(`${safeName}.dedits.json`, {
       create: true,
     });
     const writable = await fileHandle.createWritable();

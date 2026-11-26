@@ -333,7 +333,7 @@ export function ProjectConfigModal({
                 onChange={(e) =>
                   setSettings((s) => ({ ...s, locationLabel: e.target.value }))
                 }
-                placeholder="Documents\\CutLite Projects"
+                placeholder="Documents\\D-EDITS Projects"
                 className="flex-1 min-w-0 bg-[#121419] border border-[#262932] focus:border-[#00d4c6] rounded-lg px-2.5 py-1.5 text-[11px] font-mono text-white outline-none"
               />
               <button

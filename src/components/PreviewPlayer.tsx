@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Film, Pause, Play } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AudioClip,
+  GraphicClip,
   MediaAsset,
   ProjectSettings,
   TextClip,
@@ -9,7 +10,16 @@ import type {
   VideoClip,
 } from '../types/editor';
 import { evaluateCaptionAnimation } from '../utils/captions';
+import {
+  renderGraphicToCanvas,
+  type MediaElementSource,
+} from '../utils/graphicsRenderer';
 import { formatAspectRatio } from '../utils/projectConfig';
+import {
+  getGraphicSfxTriggerOffsets,
+  loadSfxAudioBuffer,
+  playOneShotSfx,
+} from '../utils/sfx';
 import { clamp, formatTimecode } from '../utils/time';
 import { computeAudioClipGain, findActiveClipsAtTime } from '../utils/timeline';
 
@@ -50,6 +60,7 @@ function VideoLayer({
   playhead,
   isPlaying,
   isSelected,
+  previewQuality,
   onPointerDown,
 }: {
   clip: VideoClip;
@@ -57,10 +68,12 @@ function VideoLayer({
   playhead: number;
   isPlaying: boolean;
   isSelected: boolean;
+  previewQuality: number;
   onPointerDown: (e: React.PointerEvent) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const gainRef = useRef<GainNode | null>(null);
+  const lastSeekAtRef = useRef<number>(0);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -97,12 +110,15 @@ function VideoLayer({
     }
 
     const syncCurrentTime = () => {
-      if (video.readyState < 1) return;
+      if (video.readyState < 1 || video.seeking) return;
       const drift = Math.abs(video.currentTime - expectedTime);
-      if (!isPlaying || drift > 0.25) {
-        if (Number.isFinite(expectedTime) && expectedTime >= 0) {
-          video.currentTime = expectedTime;
-        }
+      const now = performance.now();
+      const shouldSeek = isPlaying
+        ? drift > 0.55 && now - lastSeekAtRef.current > 650
+        : drift > 0.02;
+      if (shouldSeek && Number.isFinite(expectedTime) && expectedTime >= 0) {
+        lastSeekAtRef.current = now;
+        video.currentTime = expectedTime;
       }
     };
 
@@ -159,6 +175,16 @@ function VideoLayer({
           src={asset.url}
           preload="auto"
           playsInline
+          style={
+            previewQuality < 1
+              ? {
+                  width: `${previewQuality * 100}%`,
+                  height: `${previewQuality * 100}%`,
+                  transform: `scale(${1 / previewQuality})`,
+                  transformOrigin: 'center',
+                }
+              : undefined
+          }
           className="w-full h-full object-contain pointer-events-none"
         />
       ) : (
@@ -185,6 +211,7 @@ function AudioLayer({
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const gainRef = useRef<GainNode | null>(null);
+  const lastSeekAtRef = useRef<number>(0);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -219,9 +246,14 @@ function AudioLayer({
       audio.muted = gain <= 0;
     }
 
-    const drift = Math.abs(audio.currentTime - expectedTime);
-    if (!isPlaying || drift > 0.25) {
-      if (Number.isFinite(expectedTime) && expectedTime >= 0) {
+    if (!audio.seeking) {
+      const drift = Math.abs(audio.currentTime - expectedTime);
+      const now = performance.now();
+      const shouldSeek = isPlaying
+        ? drift > 0.55 && now - lastSeekAtRef.current > 650
+        : drift > 0.02;
+      if (shouldSeek && Number.isFinite(expectedTime) && expectedTime >= 0) {
+        lastSeekAtRef.current = now;
         audio.currentTime = expectedTime;
       }
     }
@@ -235,6 +267,89 @@ function AudioLayer({
   }, [clip, playhead, isPlaying]);
 
   return <audio key={asset.id} ref={audioRef} src={asset.url} className="hidden" />;
+}
+
+function GraphicLayer({
+  clip,
+  stageW,
+  stageH,
+  previewQuality,
+  playhead,
+  isSelected,
+  mediaAssets,
+  onPointerDown,
+}: {
+  clip: GraphicClip;
+  stageW: number;
+  stageH: number;
+  previewQuality: number;
+  playhead: number;
+  isSelected: boolean;
+  mediaAssets: MediaAsset[];
+  onPointerDown: (e: React.PointerEvent) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mediaCacheRef = useRef<Map<string, MediaElementSource>>(new Map());
+
+  useEffect(() => {
+    const cache = mediaCacheRef.current;
+    const neededIds = new Set(
+      clip.layers
+        .map((l) => l.mediaId)
+        .filter((id): id is string => Boolean(id))
+    );
+    for (const id of neededIds) {
+      if (cache.has(id)) continue;
+      const asset = mediaAssets.find((a) => a.id === id);
+      if (!asset) continue;
+      if (asset.type === 'image') {
+        const img = new Image();
+        img.src = asset.url;
+        cache.set(id, img);
+      } else if (asset.type === 'video') {
+        const vid = document.createElement('video');
+        vid.src = asset.url;
+        vid.muted = true;
+        vid.playsInline = true;
+        vid.preload = 'auto';
+        cache.set(id, vid);
+      }
+    }
+  }, [clip.layers, mediaAssets]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = Math.max(1, Math.floor(stageW * previewQuality));
+    const h = Math.max(1, Math.floor(stageH * previewQuality));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+
+    ctx.clearRect(0, 0, w, h);
+    renderGraphicToCanvas({
+      ctx,
+      width: w,
+      height: h,
+      time: playhead,
+      clip,
+      mediaSources: mediaCacheRef.current,
+    });
+  }, [clip, playhead, previewQuality, stageW, stageH]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      onPointerDown={onPointerDown}
+      className={`absolute inset-0 w-full h-full cursor-move ${
+        isSelected ? 'ring-1 ring-inset ring-[#00d4c6]' : ''
+      }`}
+    />
+  );
 }
 
 export function PreviewPlayer({
@@ -254,6 +369,14 @@ export function PreviewPlayer({
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 640, height: 360 });
+  const [previewQuality, setPreviewQuality] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('dedits_preview_quality'));
+      return [1, 0.5, 0.25, 0.125].includes(saved) ? saved : 1;
+    } catch {
+      return 1;
+    }
+  });
 
   const assetMap = useMemo(() => {
     const map = new Map<string, MediaAsset>();
@@ -276,6 +399,58 @@ export function PreviewPlayer({
     ],
     [clips, playhead]
   );
+  const activeGraphicClips = useMemo(
+    () => findActiveClipsAtTime<GraphicClip>(clips, 'graphics', playhead),
+    [clips, playhead]
+  );
+
+  // Preload & trigger synced SFX for GraphicClips during playback
+  const prevPlayheadRef = useRef<number>(playhead);
+  const firedSfxRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    for (const c of clips) {
+      if (c.trackType === 'graphics' && c.sfx?.enabled && c.sfx.sfxFile) {
+        void loadSfxAudioBuffer(ctx, c.sfx.sfxFile);
+      }
+    }
+  }, [clips]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      firedSfxRef.current.clear();
+      prevPlayheadRef.current = playhead;
+      return;
+    }
+
+    const prevT = prevPlayheadRef.current;
+    if (playhead < prevT - 0.15) {
+      firedSfxRef.current.clear();
+    }
+
+    const ctx = getAudioContext();
+    if (ctx) {
+      for (const gClip of activeGraphicClips) {
+        if (!gClip.sfx?.enabled || !gClip.sfx.sfxFile) continue;
+        const offsets = getGraphicSfxTriggerOffsets(gClip);
+        const relNow = playhead - gClip.startTime;
+        const relPrev = prevT - gClip.startTime;
+
+        offsets.forEach((off, idx) => {
+          const key = `${gClip.id}:${idx}`;
+          if (firedSfxRef.current.has(key)) return;
+          if (relNow >= off && (relPrev <= off + 0.08 || relNow - off < 0.08)) {
+            firedSfxRef.current.add(key);
+            void playOneShotSfx(ctx, gClip.sfx!.sfxFile, gClip.sfx!.volume);
+          }
+        });
+      }
+    }
+
+    prevPlayheadRef.current = playhead;
+  }, [activeGraphicClips, isPlaying, playhead]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -291,6 +466,47 @@ export function PreviewPlayer({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  const handleGraphicPointerDown = (e: React.PointerEvent, clip: GraphicClip) => {
+    e.stopPropagation();
+    onSelectClip(clip.id);
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const rect = stage.getBoundingClientRect();
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const origX = clip.transform.x;
+    const origY = clip.transform.y;
+    const snapshot = clips;
+    let moved = false;
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ((ev.clientX - startClientX) / rect.width) * 100;
+      const dy = ((ev.clientY - startClientY) / rect.height) * 100;
+      if (Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2) moved = true;
+      onUpdateClip(
+        clip.id,
+        {
+          transform: {
+            ...clip.transform,
+            x: Math.round(clamp(origX + dx, -100, 100) * 10) / 10,
+            y: Math.round(clamp(origY + dy, -100, 100) * 10) / 10,
+          },
+        },
+        false
+      );
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (moved) onPushHistory(snapshot);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
 
   const handleTextPointerDown = (e: React.PointerEvent, clip: TextClip) => {
     e.stopPropagation();
@@ -424,12 +640,13 @@ export function PreviewPlayer({
               if (!asset) return null;
               return (
                 <VideoLayer
-                  key={vClip.id}
+                  key={`${vClip.trackIndex ?? 0}-${vClip.mediaId}`}
                   clip={vClip}
                   asset={asset}
                   playhead={playhead}
                   isPlaying={isPlaying}
                   isSelected={selectedClipId === vClip.id}
+                  previewQuality={previewQuality}
                   onPointerDown={(e) => handleMediaPointerDown(e, vClip)}
                 />
               );
@@ -451,7 +668,7 @@ export function PreviewPlayer({
             if (!asset) return null;
             return (
               <AudioLayer
-                key={aClip.id}
+                key={`${aClip.trackIndex ?? 0}-${aClip.mediaId}`}
                 clip={aClip}
                 asset={asset}
                 playhead={playhead}
@@ -459,6 +676,21 @@ export function PreviewPlayer({
               />
             );
           })}
+
+          {/* Creative Graphics Overlay Layers */}
+          {activeGraphicClips.map((gClip) => (
+            <GraphicLayer
+              key={gClip.id}
+              clip={gClip}
+              stageW={stageW}
+              stageH={stageH}
+              previewQuality={previewQuality}
+              playhead={playhead}
+              isSelected={selectedClipId === gClip.id}
+              mediaAssets={mediaAssets}
+              onPointerDown={(e) => handleGraphicPointerDown(e, gClip)}
+            />
+          ))}
 
           {/* Text & Caption Overlay Layers */}
           {activeTextClips.map((tClip) => {
@@ -592,9 +824,33 @@ export function PreviewPlayer({
           </button>
         </div>
 
-        <div className="text-[11px] text-[#6d7382] font-mono">
-          {projectSettings.width}×{projectSettings.height} · {aspectLabel} ·{' '}
-          {projectSettings.fps}fps
+        <div className="flex items-center gap-2.5 text-[11px] text-[#6d7382] font-mono">
+          <label className="flex items-center gap-1.5 text-[10px] text-[#9aa0ad]">
+            <span>Preview</span>
+            <select
+              value={previewQuality}
+              onChange={(e) => {
+                const q = Number(e.target.value);
+                setPreviewQuality(q);
+                try {
+                  localStorage.setItem('dedits_preview_quality', String(q));
+                } catch {
+                  // Ignore storage errors
+                }
+              }}
+              aria-label="Preview quality"
+              className="bg-[#1e2028] border border-[#2a2d36] hover:border-[#00d4c6]/60 rounded px-1.5 py-0.5 text-[11px] text-white outline-none cursor-pointer"
+            >
+              <option value={1}>Full</option>
+              <option value={0.5}>1/2</option>
+              <option value={0.25}>1/4</option>
+              <option value={0.125}>1/8</option>
+            </select>
+          </label>
+          <span>
+            {projectSettings.width}×{projectSettings.height} · {aspectLabel} ·{' '}
+            {projectSettings.fps}fps
+          </span>
         </div>
       </div>
     </section>

@@ -5,19 +5,31 @@ import { LeftSidebar } from './components/LeftSidebar';
 import { PreviewPlayer } from './components/PreviewPlayer';
 import { ProjectConfigModal } from './components/ProjectConfigModal';
 import { PropertiesPanel } from './components/PropertiesPanel';
+import { RemoveSilenceModal } from './components/RemoveSilenceModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { ShortcutToast } from './components/ShortcutToast';
 import { Timeline } from './components/Timeline';
 import { TopBar } from './components/TopBar';
 import { useEditorState } from './hooks/useEditorState';
+import { useMcpBridge } from './hooks/useMcpBridge';
 import { useShortcuts } from './hooks/useShortcuts';
 import type {
+  AudioClip,
+  GraphicClip,
+  GraphicPreset,
   MediaAsset,
   ProjectRecord,
   ProjectSettings,
   SerializedMediaRef,
   SidebarTab,
+  TimelineClip,
+  VideoClip,
 } from './types/editor';
+import {
+  createPresetFromClip,
+  loadCustomGraphicPresets,
+  saveCustomGraphicPresets,
+} from './utils/graphicTemplates';
 import { DEFAULT_PROJECT_SETTINGS } from './utils/projectConfig';
 import {
   deleteProject,
@@ -46,11 +58,51 @@ export function App() {
   const [isSaving, setIsSaving] = useState(false);
 
   const [activeTab, setActiveTab] = useState<SidebarTab>('media');
+  const [customGraphicPresets, setCustomGraphicPresets] = useState<
+    GraphicPreset[]
+  >(() => loadCustomGraphicPresets());
+
+  const handleSaveGraphicPreset = useCallback(
+    (clip: GraphicClip, name: string) => {
+      const preset = createPresetFromClip(clip, name);
+      setCustomGraphicPresets((prev) => {
+        const next = [preset, ...prev];
+        saveCustomGraphicPresets(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleDuplicateGraphicPreset = useCallback((preset: GraphicPreset) => {
+    const copy: GraphicPreset = {
+      ...structuredClone(preset),
+      id: uid('gpreset'),
+      name: `${preset.name} (Copy)`,
+      createdAt: Date.now(),
+    };
+    setCustomGraphicPresets((prev) => {
+      const next = [copy, ...prev];
+      saveCustomGraphicPresets(next);
+      return next;
+    });
+  }, []);
+
+  const handleDeleteGraphicPreset = useCallback((presetId: string) => {
+    setCustomGraphicPresets((prev) => {
+      const next = prev.filter((p) => p.id !== presetId);
+      saveCustomGraphicPresets(next);
+      return next;
+    });
+  }, []);
   const [timelineHeight, setTimelineHeight] = useState(272);
   const [exportOpen, setExportOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newProjectModalOpen, setNewProjectModalOpen] = useState(false);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
+  const [silenceClip, setSilenceClip] = useState<VideoClip | AudioClip | null>(
+    null
+  );
 
   const [toast, setToast] = useState<{
     id: number;
@@ -288,6 +340,22 @@ export function App() {
   } = editor;
 
   const projectSettings = activeProject?.settings ?? DEFAULT_PROJECT_SETTINGS;
+
+  useMcpBridge({
+    editor,
+    screen,
+    activeProject,
+    projects,
+    projectSettings,
+    customGraphicPresets,
+    onCreateProject: (name, settings) => handleCreateProject(name, settings),
+    onOpenProject: (record) => handleOpenProject(record),
+    onUpdateProjectSettings: (name, settings) =>
+      handleUpdateProjectSettings(name, settings),
+    onSaveGraphicPreset: handleSaveGraphicPreset,
+    onDeleteGraphicPreset: handleDeleteGraphicPreset,
+    onSetExportOpen: setExportOpen,
+  });
 
   // Playback rAF loop
   useEffect(() => {
@@ -537,11 +605,16 @@ export function App() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           mediaAssets={editor.mediaAssets}
+          clips={editor.clips}
           importStatus={editor.importStatus}
           onImportFiles={editor.addMediaFiles}
           onAddMediaToTimeline={(asset) => editor.addMediaToTimeline(asset)}
           onRemoveMedia={editor.removeMediaAsset}
           onAddTextClip={editor.addTextClip}
+          customPresets={customGraphicPresets}
+          onAddGraphic={(preset) => editor.addGraphicClip(preset)}
+          onDuplicatePreset={handleDuplicateGraphicPreset}
+          onDeletePreset={handleDeleteGraphicPreset}
           onAddCaptionClips={editor.addCaptionClips}
           onSeekTo={(t) => {
             editor.setIsPlaying(false);
@@ -567,8 +640,14 @@ export function App() {
         <PropertiesPanel
           selectedClip={editor.selectedClip}
           clips={editor.clips}
+          mediaAssets={editor.mediaAssets}
           onUpdateClip={editor.updateClip}
           onApplyTextStyleToAll={editor.applyStyleToAllTextClips}
+          onSaveGraphicPreset={handleSaveGraphicPreset}
+          onRemoveSilence={(c) => {
+            editor.setIsPlaying(false);
+            setSilenceClip(c);
+          }}
           onPushHistory={editor.pushHistory}
         />
       </main>
@@ -595,6 +674,34 @@ export function App() {
         onZoomChange={editor.setZoom}
         onSplit={editor.splitAtPlayhead}
         onDelete={editor.deleteSelectedClip}
+        canRemoveSilence={Boolean(
+          (editor.selectedClip &&
+            (editor.selectedClip.trackType === 'audio' ||
+              (editor.selectedClip.trackType === 'video' &&
+                editor.selectedClip.mediaType === 'video'))) ||
+            editor.clips.some(
+              (c) =>
+                c.trackType === 'audio' ||
+                (c.trackType === 'video' && c.mediaType === 'video')
+            )
+        )}
+        onRemoveSilence={() => {
+          const target =
+            editor.selectedClip &&
+            (editor.selectedClip.trackType === 'audio' ||
+              (editor.selectedClip.trackType === 'video' &&
+                editor.selectedClip.mediaType === 'video'))
+              ? editor.selectedClip
+              : editor.clips.find(
+                  (c): c is VideoClip | AudioClip =>
+                    c.trackType === 'audio' ||
+                    (c.trackType === 'video' && c.mediaType === 'video')
+                ) ?? null;
+          if (target) {
+            editor.setIsPlaying(false);
+            setSilenceClip(target);
+          }
+        }}
         onUpdateClip={editor.updateClip}
         onPushHistory={editor.pushHistory}
         onDropMedia={(asset, startTime, trackIndex) =>
@@ -602,6 +709,9 @@ export function App() {
         }
         onDropText={(preset, startTime, trackIndex) =>
           editor.addTextClip(preset, trackIndex, startTime)
+        }
+        onDropGraphic={(preset, startTime, trackIndex) =>
+          editor.addGraphicClip(preset, trackIndex, startTime)
         }
       />
 
@@ -637,6 +747,25 @@ export function App() {
         projectSettings={projectSettings}
         clips={editor.clips}
         mediaAssets={editor.mediaAssets}
+      />
+
+      <RemoveSilenceModal
+        open={Boolean(silenceClip)}
+        clip={silenceClip}
+        mediaAsset={
+          silenceClip
+            ? editor.mediaAssets.find((a) => a.id === silenceClip.mediaId) ?? null
+            : null
+        }
+        onClose={() => setSilenceClip(null)}
+        onApply={(targetId, replacementClips: TimelineClip[]) => {
+          editor.applyEdit((prev) =>
+            prev.flatMap((c) => (c.id === targetId ? replacementClips : [c]))
+          );
+          if (replacementClips[0]) {
+            editor.setSelectedClipId(replacementClips[0].id);
+          }
+        }}
       />
     </div>
   );

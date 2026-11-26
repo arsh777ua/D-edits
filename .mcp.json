@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "cutlite": {
+      "command": "node",
+      "args": [
+        "./mcp/dist/server.js"
+      ],
+      "env": {
+        "CUTLITE_BRIDGE_URL": "http://127.0.0.1:8766"
+      }
+    }
+  }
+}

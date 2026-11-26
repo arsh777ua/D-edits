@@ -5,14 +5,17 @@ import {
   Music,
   Plus,
   Scissors,
+  Sparkles,
   Trash2,
   Type,
+  VolumeX,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import type {
+  GraphicPreset,
   MediaAsset,
   TextClip,
   TimelineClip,
@@ -41,6 +44,8 @@ interface TimelineProps {
   onZoomChange: (zoom: number) => void;
   onSplit: () => void;
   onDelete: () => void;
+  canRemoveSilence?: boolean;
+  onRemoveSilence?: () => void;
   onUpdateClip: (
     id: string,
     patch: Partial<TimelineClip>,
@@ -53,6 +58,11 @@ interface TimelineProps {
     startTime: number,
     trackIndex?: number
   ) => void;
+  onDropGraphic?: (
+    preset: GraphicPreset,
+    startTime: number,
+    trackIndex?: number
+  ) => void;
 }
 
 const TRACK_STYLE: Record<
@@ -61,6 +71,7 @@ const TRACK_STYLE: Record<
 > = {
   captions: { heightClass: 'h-9', icon: Captions },
   text: { heightClass: 'h-9', icon: Type },
+  graphics: { heightClass: 'h-10', icon: Sparkles },
   video: { heightClass: 'h-12', icon: Film },
   audio: { heightClass: 'h-10', icon: Music },
 };
@@ -84,10 +95,13 @@ export function Timeline({
   onZoomChange,
   onSplit,
   onDelete,
+  canRemoveSilence,
+  onRemoveSilence,
   onUpdateClip,
   onPushHistory,
   onDropMedia,
   onDropText,
+  onDropGraphic,
 }: TimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lanesContainerRef = useRef<HTMLDivElement>(null);
@@ -416,6 +430,17 @@ export function Timeline({
     const x = e.clientX - rect.left + container.scrollLeft - 112;
     const dropTime = Math.max(0, x / zoom);
 
+    const graphicPayload = e.dataTransfer.getData('application/x-cutlite-graphic');
+    if (graphicPayload && targetTrack === 'graphics') {
+      try {
+        const preset = JSON.parse(graphicPayload) as GraphicPreset;
+        onDropGraphic?.(preset, dropTime, targetIndex);
+      } catch {
+        // Ignore invalid payload
+      }
+      return;
+    }
+
     const textPayload = e.dataTransfer.getData('application/x-cutlite-text');
     if (textPayload && (targetTrack === 'text' || targetTrack === 'captions')) {
       try {
@@ -475,6 +500,19 @@ export function Timeline({
             <span>Delete</span>
           </button>
 
+          {onRemoveSilence && (
+            <button
+              type="button"
+              onClick={onRemoveSilence}
+              disabled={!canRemoveSilence}
+              title="Remove silent parts from selected video/audio clip"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs text-[#d0d4dc] hover:text-[#00d4c6] hover:bg-[#232630] disabled:opacity-35 disabled:pointer-events-none transition-colors cursor-pointer"
+            >
+              <VolumeX className="w-3.5 h-3.5" />
+              <span>Remove Silence</span>
+            </button>
+          )}
+
           <div className="h-4 w-px bg-[#262932] mx-1" />
 
           {/* Add Layer Controls */}
@@ -487,6 +525,15 @@ export function Timeline({
             >
               <Plus className="w-3 h-3 text-[#00d4c6]" />
               <span>Video</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onAddTrack('graphics')}
+              title="Add Graphics Layer"
+              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-[#1e2028] border border-[#2a2d36] text-[#d0d4dc] hover:text-white hover:border-[#00d4c6]/60 cursor-pointer"
+            >
+              <Plus className="w-3 h-3 text-[#00d4c6]" />
+              <span>Graphics</span>
             </button>
             <button
               type="button"
@@ -657,7 +704,8 @@ export function Timeline({
                     onDragOver={(e) => {
                       if (
                         e.dataTransfer.types.includes('application/x-cutlite-media') ||
-                        e.dataTransfer.types.includes('application/x-cutlite-text')
+                        e.dataTransfer.types.includes('application/x-cutlite-text') ||
+                        e.dataTransfer.types.includes('application/x-cutlite-graphic')
                       ) {
                         e.preventDefault();
                       }
@@ -685,6 +733,9 @@ export function Timeline({
                       } else if (clip.trackType === 'captions') {
                         colorClasses =
                           'bg-[#283056] border-[#45518f] text-[#e0e7ff]';
+                      } else if (clip.trackType === 'graphics') {
+                        colorClasses =
+                          'bg-[#13383c] border-[#00d4c6]/50 text-[#ccfbf1]';
                       }
 
                       return (

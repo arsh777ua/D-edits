@@ -1,44 +1,61 @@
-# CutLite — Minimal Video Editor
+# D-EDITS
 
-A lightweight, CapCut Desktop-inspired web video editor built with **React**, **TypeScript**, **Tailwind CSS**, **Web Audio API**, **FFmpeg.wasm**, and an optional local **Python (`faster-whisper`)** auto-caption server.
-
-## Features
-
-- **Project Home Screen & Management**: Create, rename, duplicate, search, sort, and delete projects with customizable resolution (`360p`–`4K` & `Custom`), aspect ratio (`16:9`, `9:16`, `1:1`, `4:5`, `21:9`, `Custom`), frame rate (`24`–`60 FPS`), preview background, and local storage (`IndexedDB` + local folder `.cutlite.json`).
-- **Multilayer Timeline**: Separate `Captions`, `Text`, `Video`, and `Audio` layers with `+ Video` / `+ Text` / `+ Audio` / `+ Captions` track controls, marquee drag multi-selection, `Shift`/`Ctrl`-click selection, clip snapping, trimming, splitting, and ripple delete (`Q` / `W`).
-- **Interactive Preview**: Exact project-resolution preview stage, Web Audio API gain (`-100 dB` to `+20 dB`), transform/crop/rotate, brightness/contrast, playback speed (`0.5x`–`2x`), and direct canvas positioning.
-- **Auto Captions (Hinglish & English)**: Local GPU/CPU transcription via `faster-whisper` with **8 animated caption templates** + Normal mode, customizable fonts, colors, outlines, shadows, background pills, and **Apply Style to All**.
-- **Customizable Keyboard Shortcuts**: 21 default NLE shortcuts + mouse-wheel navigation (`Alt+Scroll` move, `Ctrl+Scroll` zoom, `Shift+Scroll` scrub), conflict detection, and `localStorage` persistence.
-- **MP4 Export**: Fast GPU `MediaRecorder` MP4 export and high-quality FFmpeg.wasm `libx264` CRF export with `720p`–`4K` resolution and bitrate presets.
+A web-based video editor built with React, TypeScript, Vite, Tailwind CSS, FFmpeg, and a built-in CutLite AI MCP server.
 
 ## Getting Started
-
-### Prerequisites
-
-- **Node.js** (v18+ recommended)
-- **Python 3.10+** with `faster-whisper` (optional, for local Auto Captions & local folder saving):
-  ```bash
-  pip install faster-whisper
-  ```
-
-### Run on Windows
-
-Double-click `start.bat` or run:
 
 ```bash
 npm install
 npm run dev
 ```
 
-To run the local Auto-Caption & project folder server alongside the dev server:
+Or on Windows, run `start.bat` to install dependencies (if needed), start the optional Python auto-caption server (`server/caption_server.py`), and launch the dev server.
+
+### Scripts
+
+- `npm run dev` — Start the Vite development server (and local MCP bridge on `http://127.0.0.1:8766`)
+- `npm run build` — Type-check, build the MCP server, and bundle the app into `dist/`
+- `npm run build:mcp` — Build only the MCP server (`mcp/dist/server.js`)
+- `npm run lint` — Run Oxlint
+- `npm run preview` — Preview the production build
+
+
+## CutLite AI MCP Server
+
+CutLite includes a built-in **Model Context Protocol (MCP)** server so any AI CLI (Claude Code, Gemini CLI, Codex CLI, Cursor, Antigravity, etc.) can inspect and edit videos directly inside the live editor.
+
+### How it works
+
+1. **Editor + Bridge (`http://127.0.0.1:8766`)**: When you start CutLite (`npm run dev` or `start.bat`), Vite automatically starts the local CutLite MCP Bridge on port `8766`. The open browser tab connects to it via Server-Sent Events (SSE).
+2. **MCP Server (`mcp/dist/server.js`)**: Any AI CLI spawns `node mcp/dist/server.js` over `stdio`. Each tool call is forwarded through the bridge to your live CutLite editor.
+
+### Build the MCP server
 
 ```bash
-python server/caption_server.py
+npm run build:mcp
 ```
 
-## Build & Lint
+### Connect from any CLI
 
-```bash
-npm run build
-npm run lint
-```
+- **Claude Code**:
+  ```bash
+  claude mcp add cutlite -- node "./mcp/dist/server.js"
+  ```
+- **Gemini CLI / Codex / Cursor / Antigravity** (MCP JSON config):
+  ```json
+  {
+    "mcpServers": {
+      "cutlite": {
+        "command": "node",
+        "args": ["./mcp/dist/server.js"]
+      }
+    }
+  }
+  ```
+
+### Available MCP Tools
+
+- **Inspect & Projects**: `get_editor_state`, `list_projects`, `create_project`, `open_project`, `update_project_settings`
+- **Media**: `import_media_from_path`, `remove_media`, `add_media_to_timeline`
+- **Editing & Timeline**: `add_text_clip`, `add_caption_clips`, `update_clip`, `split_clip`, `ripple_delete_left`, `ripple_delete_right`, `delete_clips`, `apply_style_to_all_text`, `manage_track`
+- **Playback & History**: `set_playhead`, `set_playback`, `select_clips`, `undo`, `redo`, `open_export_modal`
